@@ -1,0 +1,255 @@
+---
+title: "Network Analysis Hands-On"
+author: "Sam Larsen"
+date: "2023-05-03"
+output:
+  html_document:
+    theme: spacelab
+
+---
+<style type="text/css">
+  body{
+  font-size: 14pt;
+}
+</style>
+
+<style>
+  pre{
+  font-size: 14pt;
+}
+</style>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(dpi = 600)
+
+```
+
+First, we need to load the necessary packages and load the data.
+
+```{r data_prep, message = FALSE}
+library(qgraph)
+library(psych)
+library(GPArotation)
+library(lavaan)
+library(psychTools)
+
+data(bfi)
+
+bfi <- bfi[,1:25]
+
+bfi <- na.omit(bfi)
+```
+
+Next we run a factor analysis on the BFI data using `lavaan`.
+
+```{r cfa_model}
+model <- 'N =~ N1 + N2 + N3 + N4 + N5
+          E =~ E1 + E2 + E3 + E4 + E5
+          O =~ O1 + O2 + O3 + O4 + O5
+          A =~ A1 + A2 + A3 + A4 + A5
+          C =~ C1 + C2 + C3 + C4 + C5'
+
+cfa_fit <- cfa(model, data = bfi)
+
+# Print the results
+summary(cfa_fit)
+```
+
+Now that we have confirmed that a five-factor structure works for this data, we can start using this data to explore network psychometrics! In network psychometrics, it's usually typical to analyze the individual items that make up a factor rather than the summary variables. But it is still possible to analyze summary variables as components in a network (e.g., depression).
+
+To analyze the data, we will be using the `qgraph` package in R. The main function is, surprise, `qgraph()`, and the input it takes is an edge-list or a weights matrix. What are those you ask?
+
+### Edge lists
+
+An edge list looks like this:
+
+```{r edge_list, echo = FALSE}
+edge_list_example <- data.frame(
+  From = c("Var1", "Var1", "Var2", "Var2", "Var3"),
+  To = c("Var2", "Var3", "Var3", "Var4", "Var4"),
+  Weight = c(0.6, 0.4, 0.5, 0.7, 0.3)
+)
+
+knitr::kable(edge_list_example, format = "simple", align = 'c', full_width = F)
+```
+
+An edge list calculates the similarity (or dissimilarity) between data points and represents the relationship as pairs of nodes with associated weights. Edge lists are also called similarity or adjacency matrices.
+
+The easy way to do this is by using the `igraph` package:
+
+```{r igraph_similarity_matrix}
+similarity_matrix <- cor(bfi)
+
+graph <- igraph::graph_from_adjacency_matrix(similarity_matrix, mode = "undirected", weighted = TRUE, diag = FALSE)
+
+edge_list <- igraph::get.data.frame(graph)
+
+knitr::kable(head(edge_list), format = "simple", align = 'c', full_width = F)
+```
+
+Looking at these results, it should be clear that an edge list is nothing more than a reformatted correlation matrix when creating edges based on correlations. See:
+
+```{r correlations_compare, echo = FALSE}
+correlations <- cor(bfi)
+knitr::kable(correlations[1:3,1:3], format = "simple",align = 'c', full_width = F)
+```
+
+A correlation table mirrors the general format for a **weights table** (also called an association table), which is an *n x n* matrix where the rows are the origin node and the columns are the destination node.
+
+The values in a weights table can be made using any statistic that indicates the strength of the connection between nodes as long as 0 is used to indicate no connection, and the absolute negative values are similar in strength to the positive values.
+
+If the data in the matrix is symmetrical, it will generate a network plot that is **undirected**. If the data in the matrix is asymmetrical, the network plot will be **directed**. Here are some plots illustrating the difference between the two:
+
+```{r undirected_graph, echo = FALSE, message = FALSE}
+library(qgraph)
+M <- matrix(c(0, 0.2, -0.3, 0.1, -0.4,
+              0.2, 0, 0.5, -0.2, 0,
+              -0.3, 0.5, 0, 0.4, -0.1,
+              0.1, -0.2, 0.4, 0, 0.2,
+              -0.4, 0, -0.1, 0.2, 0), 
+            nrow = 5, ncol = 5, byrow = TRUE)
+
+knitr::kable(M,align = 'c', full_width = F)
+
+qgraph(M, title = "Undirected Graph", theme = "colorblind", layout = "spring")
+
+```
+
+This is an **undirected graph**; think of the edges of the nodes in these graphs as representing "mutual relationships". If this was a social network, those nodes with a red edge would both agree they didn't like each other and agree on the strength of that dislike, whereas those with a blue edge both agree they like each other and how much they like each other. The opacity and size of the line indicate the strength of the relationship, because the properties of these edges vary between nodes, we say that this graph is **weighted**.
+
+**Directed graphs**, in contrast, show nodes that are considered to be a *source* and which are to be considered a *destination*. Hence the "to" and "from" wording in the edge list (even though this wording applies to edge lists used in both directed and undirected graphs). Below is an example asymmetric weight table and its corresponding directed graph:
+
+```{r directed_graph, echo = FALSE, message = FALSE}
+D <- matrix(c(0, 0.5, 0.4, 0, -0.2, -0.1, 0, 0, 0.3, -0.3, 0, 0, 0.4, 0.3, 0, 0, 0, 0, 0, -0.3, 0, 0, 0.4, 0.3, 0, 0, 0, 0.4, 0, 0.2, -0.1, 0, 0, 0.3, 0.2, 0), nrow = 6, ncol = 6, byrow = TRUE )
+
+knitr::kable(D,align = 'c', full_width = F)
+
+qgraph(D, title = "Directed Graph", theme = "colorblind")
+```
+
+Notice that in this example most nodes are directed at each other. However, node 1 has more outgoing edges (2,3,5,6) than incoming edges (3,6), and depending on the network we are analyzing, this could indicate that this node is relatively isolated from the rest.
+
+What is important to note that while edge lists and weight matrices are the inputs into `qgraph` and are used to create the network graph, they only represent the network structure at a basic level and more detailed analyses can still be done.
+
+Back to our data. Let's graph it as a network:
+
+```{r bfi_cor_network}
+bfi_cor <- cor(bfi)
+
+network <- qgraph(bfi_cor, layout = "spring", theme = "colorblind")
+```
+
+Already we can see the beginnings of a very interesting network structure. However, because we are using only correlations, we aren't gaining much more insight than we would have with only factor analysis. Also, remember how I said a main feature and strength of network psychometrics is its ability to estimate model parameters; looking at correlations hardly does this. Let's instead estimate our network based on our data. To do this, we will estimate the network using a pairwise Markov random field (PMRF) model.
+
+However, before we get into network estimation, we need to understand a few core concepts.
+
+First, remember that a PMRF model "is a class of undirected network models in which variables are represented by nodes connected by edges that indicate the (strength of) conditional association between two variables **after controlling for all other variables in the network**" (Taylor & Francis, 2022, p. 162).
+
+Which brings us to a very cool feature of network estimation!
+
+### Conditional Dependence and Independence
+
+Because network psychometrics focuses so much on accurately representing and estimating the relationships between variables, it's important to factor in that some variables might impact others, or not at all.
+
+When the strength of a relationship between two variables does not depend on the value of any other variable, the variables are said to be **conditionally independent**, and the inverse occurs when the variables are **conditionally dependent**.
+
+In general, most networks are considered to have some amount of dependency, otherwise you wouldn't have much of a network! It's also the analysis of how the variables interact which is also one of the main reasons for conducting network analysis. Additionally, this is why PMRF models are so popular, since they work well with data that is assumed to have some level of dependency.
+
+Additionally, PMRF models have model sub-classes that are used for specific types of data, like an Ising model for binary data or a Gaussian for continuous data. But for our purposes, we will stick to a basic partial correlation.
+
+To conduct our analysis, let's use the `bootnet` package, which is really just a wrapper for other estimation functions, to run a PMRF to estimate the network structure of our measurement theory assessment items.
+
+```{r groupings, echo = FALSE}
+groupings <- c("Agreeableness", "Agreeableness", "Agreeableness", "Agreeableness", "Agreeableness",
+                      "Conscientiousness", "Conscientiousness", "Conscientiousness", "Conscientiousness", "Conscientiousness",
+                      "Extraversion", "Extraversion", "Extraversion", "Extraversion", "Extraversion",
+                      "Neuroticism", "Neuroticism", "Neuroticism", "Neuroticism", "Neuroticism",
+                      "Openness", "Openness", "Openness", "Openness", "Openness")
+
+```
+
+```{r bfi_estimated_network}
+library(bootnet)
+
+network <- estimateNetwork(bfi, default = "pcor")
+
+print(network)
+
+plot(network, layout = "spring", groups = groupings, theme = "colorblind")
+```
+
+This generated network looks a bit messy because it shows all the edges. In network analytics this is termed a **saturated graph**.
+
+In the following code we **prune** the network to only have significant edges at p = .05. Using the pruning method, all non-significant values are set to 0 in the network and thus impacts analysis of the network data.
+
+**Thresholding** in contrast would simply remove the non-significant values from the plot, but keep them included in the network and they are used in analysis.
+
+```{r bfi_pruned}
+network <- estimateNetwork(bfi, default = "pcor", threshold = "sig", alpha = 0.05)
+
+print(network)
+
+# Further showing that we "pruned" rather than threshold
+knitr::kable(head(network$results[1:3,1:3]),align = 'c', full_width = F)
+
+plot(network, groups = groupings, layout = "spring", theme = "colorblind", minimum = 0.1)
+```
+
+Here I also set the minimum to .1, so only edges with an absolute value greater than .1 are plotted. The minimum value is sometimes a subjective choice, in this case I think it balances interpretability while maintaining enough information.
+
+Now we can start to notice interesting visual things about our network! According to the CFA, variables should cluster together by factor. In this graph, we can see that this is generally the case with the variables of similar factors being linked together more than with variables of other factors. However, there appears to be an interesting clustering around neuroticism items and the third agreeableness item.
+
+However, reviewers won't be happy if you just do a visual examination of your network. They want to see the numbers! So let's get some. Network scientists have developed a few key metrics that we can use here to examine our network. We can obtain some of these metrics using `qgraph`'s centrality plots:
+
+```{r}
+centralityPlot(network, include = "all", scale = "raw0")
+```
+
+Note: the scale used in the plot is the raw partial correlation values with the scales anchored at 0.
+
+**Strength** - Is the sum of the absolute edge weights of all the edges connected to the node. In this graph, the partial correlation values are what are being summed. Strength can be considered a proxy measure of influence or importance of a node.
+
+**Closeness** - Is the inverse of the average distance of a node to all other nodes in the network. The distance of a node is the shortest path that connects them together. In this case, all the nodes are close to each other because the closeness value is small.
+
+**Betweeness** - Is a way to measure how often a node is between two other nodes. A node with high betweeness is considered a *bridge* between other parts of the network. In psychometrics, a variable with high betweeness might indicate that the variable plays a role in connecting clusters, or possibly represents a unique aspect of the construct being measured.
+
+**Expected Influence** - This metric is similar to strength in that it is the sum of the edge weights extending from a node, but does not take the absolute value of these nodes.
+
+Note, while negative influences can exist in a network, but in the context of expected influence only the positive impact of the node is considered, therefore the lowest possible value for expected influence is 0.
+
+Higher influence indicates how much that node can impacts the other nodes in a network. This can be useful for network psychometrics because we can identify the symptoms that are having the greatest impact on the other nodes in the network.
+
+Because our data is considered continuous, the `qgraph` function `clusteringPlots()` doesn't work well as it is designed to work with categorical and binary data. Our data is being treated as continuous in this case.
+
+## Bootstrapping
+
+It is common to use bootstrapping methods when estimating network structures from data. Doing so gives better estimates of the "true" edge weights by considering variability between different samples. The primary way this is accomplished is by identifying the confidence intervals around the edge weights.
+
+We can do this with `bootnet`:
+
+```{r}
+# Warning! This step is fairly computationally expensive! Be sure to lower the number of cores to that which is appropriate for your device.
+b1 <- bootnet(network, nboots = 1000, default = "pcor", ncores = 14,threshold = "sig", alpha = 0.05)
+
+plot(b1, labels = FALSE, order = "sample")
+
+plot(b1$sample, groups = groupings, layout = "spring", theme = "colorblind", minimum = 0.1)
+```
+
+You'll notice that the bootstrapped network is slightly different to the one we estimated previously. This is because parameter estimation (e.g., edge weights) is subject to sampling variation, so the estimated parameters come with a level of uncertainty which becomes lower in larger samples. The important thing to remember is that estimated networks may not represent true network structures, and that networks will vary based on sampling.
+
+But we're here to look at the CI's for the bootstrapped edge weights.
+
+```{r}
+plot(b1, "edge", labels = FALSE, order = "sample")
+```
+
+To interpret this plot, we want to look for edges with narrow confidence intervals that do not cross the zero line. These represent stable and significant relationships in the network.
+
+In general, most of the edges are 0 (see the long vertical red line and grey areas that cross over 0). And, in my opinion, the number of edges that are not 0 matches the ones that we see in the network graph.
+
+It should be noted that bootstrapping generally shouldn't be used to estimate other network parameters (e.g., betweenness) because many of the centrality metrics use absolute values in their calculations this means 0 is the lowest bound of an estimated parameter range, and 0's cause a lot of problems when bootstrapping. And we should expect a lot of 0 edges in our network models, especially if there are distinct and distant clusters of variables.
+
+And that's pretty much a brief introduction to network psychometrics!
